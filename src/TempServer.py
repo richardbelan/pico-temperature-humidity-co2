@@ -4,11 +4,15 @@ import time
 import rp2
 import MeasureCtrl
 
+import LogFile
+
+srverr = LogFile.LogFile("server.err")
+
 class TempServer:
     def __init__(self, measCtrl):
         try:
-            self.ssid = '963bzpgn'
-            self.password = '7grn6tkm'
+            self.ssid = 'WiFimodem-3544'
+            self.password = 'uznyktmyug'
             #self.webContent = """<!DOCTYPE html>
             #                     <html>
             #                        <head> <title>Temp Humidity CO2 server</title> </head>
@@ -26,7 +30,7 @@ class TempServer:
             self.MC = measCtrl
             
         except:
-            print('execption upon start-up')
+            srverr.write("exception upon start-up")
 
         
     def initialize(self):
@@ -35,7 +39,7 @@ class TempServer:
             self.wlan.active(True)
             return True
         except:
-            print('exception during initializing')
+            srverr.write("exception during initializing")
             return False
         
     def connectToNetworkInfrastructure(self):
@@ -64,7 +68,7 @@ class TempServer:
                 print( 'ip = ' + status[0] )
             return True
         except:
-            print('exception during infrastructire connection')
+            srverr.write("exception during infrastructure connection")
             return False
 
     def listen(self):
@@ -78,7 +82,7 @@ class TempServer:
             print('listening on', addr)
             return True
         except:
-            print('exception during listening')
+            srverr.write("exception during listening")
             return False
         
     def acceptConnections(self):
@@ -90,12 +94,12 @@ class TempServer:
                 time.sleep(1) # 1s
                 
                 request = cl.recv(2048)
-                print('client connected from', addr)
+                # print('client connected from', addr)
                 
                 if request:
-                    print('client connected from', addr)
+                    #print('client connected from', addr)
                 
-                    print(request)
+                   # print(request)
                 #request = str(request)
                 
                 #findCmd = request.find('/measurement')
@@ -106,13 +110,17 @@ class TempServer:
                     stateis = self.MC.getData()
 
                     response = self.webContent % stateis
-                    cl.send('HTTP/1.1 200 OK\r\nContent-type: application/xml\r\n\r\n')
+                    cl.send("HTTP/1.1 200 OK\r\nContent-type: application/xml\r\n\r\n")
                     cl.send(response)
                     
                 cl.close()
         
             except:
-                cl.close()
-                print('connection closed')
-                time.sleep(5) # 5s
+                try:
+                    cl.close()
+                    time.sleep(5) # 5s
+                    srverr.write("connection closed")
+                except:
+                    time.sleep(5) # 5s
+                    srverr.write("Exception in exception");
     

@@ -9,6 +9,10 @@ import Settings
 import gc
 import os
 
+import LogFile
+
+ferr = LogFile.LogFile("measure.err")
+
 ####################################################################
 #use of pins
 # GP pin  PWM  FNC
@@ -57,6 +61,7 @@ class MeasureCtrl:
         self.temCal = Calibrate.Calibrate(Settings.Settings.TemperatureOffset())
         self.humCal = Calibrate.Calibrate(Settings.Settings.HumidityOffset())
         
+        ferr.write("init measurement")
         
         gc.enable()
             
@@ -68,6 +73,7 @@ class MeasureCtrl:
             self.RegHum = self.humCal.convert(self.sensor.humidity())
         
         except Exception:
+            ferr.write("exception in initialize")
             self.RegTemp = 25
             self.RegHum = 50
         
@@ -101,6 +107,7 @@ class MeasureCtrl:
             f.close()
             return bytes([baseline[0], baseline[1]])
         except Exception:
+            ferr.write("exception in readBaseline")
             return None
         
     def saveBaseline(self):
@@ -113,6 +120,7 @@ class MeasureCtrl:
             f.close()
             return None
         except Exception:
+            ferr.write("exception in saveBaseline")
             return None
         
     def getData(self):
@@ -120,95 +128,97 @@ class MeasureCtrl:
 
     def measure(self):
         while True:
-            #DTH22 results
-            self.AliveLED.toggle()
-            
             try:
-                self.sensor.measure()
-                self.temp = self.temCal.convert(self.sensor.temperature())
-                self.hum = self.humCal.convert(self.sensor.humidity())
-            except Exception:
-                print("exception from DHT sensor")
-            
-            try:
-                self.lightLevel = (100* self.adcLight.read_u16() / 65535)
-                tmpReading = self.adcCoreTemp.read_u16() * self.conversionFactor
-                self.coreTemp = 27 - (tmpReading - 0.706)/0.001721
-            except Exception:
-                print("exception from computation")
-
-            if self.co2.data_available():
+                #DTH22 results
+                self.AliveLED.toggle()
+                
                 try:
-                    r = self.co2.read_algorithm_results()
+                    self.sensor.measure()
+                    self.temp = self.temCal.convert(self.sensor.temperature())
+                    self.hum = self.humCal.convert(self.sensor.humidity())
                 except Exception:
-                    print("exception from read out out CO2 sensor")
-     
-                gcfree = gc.mem_free()
-   
-                retString = "Temp: {:.1f}C, Humidity: {:.0f}%. CO2={}, tVOC={}, light={:.1f}, coreTmp={:-0.1f} gc {}".format(self.temp, self.hum, r[0], r[1], self.lightLevel, self.coreTemp, gcfree)
-                print(retString)
-                self.XMLString = "<measurement><temperature>{:.1f}</temperature><humidity>{:.0f}</humidity><co2>{}</co2><tvoc>{}</tvoc><light>{:.1f}</light><core>{:-0.1f}</core><gc>{}</gc></measurement>".format(self.temp, self.hum, r[0], r[1], self.lightLevel, self.coreTemp, gcfree)
-        
-                if r[0] > 2200:
-                    self.LED_CO2.set(0, self.lightLevel)
-                else:
-                    if r[0] > 1350:
-                        #red
-                        self.LED_CO2.set(1, self.lightLevel)
+                    ferr.write("exception from DHT sensor")
+                
+                try:
+                    self.lightLevel = (100* self.adcLight.read_u16() / 65535)
+                    tmpReading = self.adcCoreTemp.read_u16() * self.conversionFactor
+                    self.coreTemp = 27 - (tmpReading - 0.706)/0.001721
+                except Exception:
+                    ferr.write("exception from computation")
+
+                if self.co2.data_available():
+                    try:
+                        r = self.co2.read_algorithm_results()
+                    except Exception:
+                        ferr.write("exception from read out out CO2 sensor")
+         
+                    gcfree = gc.mem_free()
+       
+                    retString = "Temp: {:.1f}C, Humidity: {:.0f}%. CO2={}, tVOC={}, light={:.1f}, coreTmp={:-0.1f} gc {}".format(self.temp, self.hum, r[0], r[1], self.lightLevel, self.coreTemp, gcfree)
+                    print(retString)
+                    self.XMLString = "<measurement><temperature>{:.1f}</temperature><humidity>{:.0f}</humidity><co2>{}</co2><tvoc>{}</tvoc><light>{:.1f}</light><core>{:-0.1f}</core><gc>{}</gc></measurement>".format(self.temp, self.hum, r[0], r[1], self.lightLevel, self.coreTemp, gcfree)
+            
+                    if r[0] > 2200:
+                        self.LED_CO2.set(0, self.lightLevel)
                     else:
+                        if r[0] > 1350:
+                            #red
+                            self.LED_CO2.set(1, self.lightLevel)
+                        else:
+                            #yellow
+                            self.LED_CO2.set(2, self.lightLevel)
+                    self.measurementLoopNo = self.measurementLoopNo + 1
+                    
+                    #treatment of the baseline
+                    
+                    #save baselines at day 1, 2, 4, 6 
+                    if self.measurementLoopNo == 1*(60*24) or self.measurementLoopNo == 2*(60*24) or self.measurementLoopNo == 4*(60*24) or self.measurementLoopNo == 6*(60*24):
+                        self.saveBaseline()
+                        
+                    #save baseline on a weekly basis with reset
+                    if self.measurementLoopNo >= 14*(60*24):
+                        self.saveBaseline()
+                        #reset one week
+                        self.measurementLoopNo = 7*(60*24)
+                        
+                    #modify the parameters after a successfull read session
+                    if self.updateRegTemHum == True:
+                        self.co2.setTempHum(self.temp, self.hum)
+                        self.RegHum = self.hum
+                        self.RegTemp = self.temp
+                        self.updateRegTemHum = False
+
+
+                if self.hum > 65:
+                    #red
+                    self.LED_HUM.set(0, self.lightLevel)
+                else:
+                    if self.hum > 55 :
                         #yellow
-                        self.LED_CO2.set(2, self.lightLevel)
-                self.measurementLoopNo = self.measurementLoopNo + 1
+                        self.LED_HUM.set(1, self.lightLevel)
+                    else:
+                        #green
+                        self.LED_HUM.set(2, self.lightLevel)
                 
-                #treatment of the baseline
-                
-                #save baselines at day 1, 2, 4, 6 
-                if self.measurementLoopNo == 1*(60*24) or self.measurementLoopNo == 2*(60*24) or self.measurementLoopNo == 4*(60*24) or self.measurementLoopNo == 6*(60*24):
-                    self.saveBaseline()
-                    
-                #save baseline on a weekly basis with reset
-                if self.measurementLoopNo >= 14*(60*24):
-                    self.saveBaseline()
-                    #reset one week
-                    self.measurementLoopNo = 7*(60*24)
-                    
-                #modify the parameters after a successfull read session
-                if self.updateRegTemHum == True:
-                    self.co2.setTempHum(self.temp, self.hum)
-                    self.RegHum = self.hum
-                    self.RegTemp = self.temp
-                    self.updateRegTemHum = False
+                if math.fabs(self.RegHum - self.hum) > 2:
+                    self.updateRegTemHum = True
 
-
-            if self.hum > 65:
-                #red
-                self.LED_HUM.set(0, self.lightLevel)
-            else:
-                if self.hum > 55 :
-                    #yellow
-                    self.LED_HUM.set(1, self.lightLevel)
+                if self.temp > 28.0 or self.temp < 16.0:
+                    #red
+                    self.LED_TMP.set(0, self.lightLevel)
                 else:
-                    #green
-                    self.LED_HUM.set(2, self.lightLevel)
-            
-            if math.fabs(self.RegHum - self.hum) > 2:
-                self.updateRegTemHum = True
+                    if self.temp > 25.0 or self.temp < 18.0 :
+                        #yellow
+                        self.LED_TMP.set(1, self.lightLevel)
+                    else:
+                        #green
+                        self.LED_TMP.set(2, self.lightLevel)
 
-            if self.temp > 28.0 or self.temp < 16.0:
-                #red
-                self.LED_TMP.set(0, self.lightLevel)
-            else:
-                if self.temp > 25.0 or self.temp < 18.0 :
-                    #yellow
-                    self.LED_TMP.set(1, self.lightLevel)
-                else:
-                    #green
-                    self.LED_TMP.set(2, self.lightLevel)
-
-            if math.fabs(self.RegTemp - self.temp) > 1:
-                self.updateRegTemHum = True
-        
-            time.sleep(1)
-            gc.collect()
+                if math.fabs(self.RegTemp - self.temp) > 1:
+                    self.updateRegTemHum = True
             
+                time.sleep(1)
+                gc.collect()
+            except Exception:
+               ferr.write("exception in loop")
             
